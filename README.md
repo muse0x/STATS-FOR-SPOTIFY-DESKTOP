@@ -2,7 +2,7 @@
 
 desktop client for statsforspotify because opening the browser is too much effort.
 
-built with electron + vite. no bloat.
+built with electron + vite. no bloat ( jk)
 
 ---
 
