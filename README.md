@@ -6,6 +6,19 @@ built with electron + vite. no bloat.
 
 ---
 
+### how it looks
+
+<p align="center">
+  <img src="screenshots/top-tracks.png" width="49%" alt="top tracks" />
+  <img src="screenshots/top-artists.png" width="49%" alt="top artists" />
+</p>
+<p align="center">
+  <img src="screenshots/top-genres.png" width="49%" alt="top genres" />
+  <img src="screenshots/recently-played.png" width="49%" alt="recently played" />
+</p>
+
+---
+
 ### features
 
 - **top tracks / artists / genres** across 4 weeks, 6 months, and all time.
