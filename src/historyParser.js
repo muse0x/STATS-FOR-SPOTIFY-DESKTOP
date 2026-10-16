@@ -36,9 +36,41 @@ export function parseSpotifyRecords(records) {
     artists[artistKey].totalMs += ms;
   }
 
-  const result = { totalMs, totalPlays, tracks, artists, importedAt: Date.now() };
-  localStorage.setItem(historyStorageKey, JSON.stringify(result));
-  return result;
+  return { totalMs, totalPlays, tracks, artists, importedAt: Date.now() };
+}
+
+export function mergeSpotifyHistory(current, next) {
+  if (!next) return current;
+  if (!current) return next;
+
+  current.totalMs += next.totalMs;
+  current.totalPlays += next.totalPlays;
+
+  Object.entries(next.tracks).forEach(([key, track]) => {
+    const currentTrack = current.tracks[key];
+    if (!currentTrack) {
+      current.tracks[key] = track;
+      return;
+    }
+    currentTrack.plays += track.plays;
+    currentTrack.totalMs += track.totalMs;
+  });
+
+  Object.entries(next.artists).forEach(([key, artist]) => {
+    const currentArtist = current.artists[key];
+    if (!currentArtist) {
+      current.artists[key] = artist;
+      return;
+    }
+    currentArtist.plays += artist.plays;
+    currentArtist.totalMs += artist.totalMs;
+  });
+
+  return current;
+}
+
+export function storeHistoryData(historyData) {
+  localStorage.setItem(historyStorageKey, JSON.stringify(historyData));
 }
 
 export function getStoredHistory() {

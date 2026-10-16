@@ -3,6 +3,7 @@ import path from 'path';
 import http from 'http';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { Worker } from 'node:worker_threads';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -141,20 +142,33 @@ ipcMain.handle('open-popup-auth', (event, { scopes, challenge }) => {
 
 ipcMain.handle('open-external-url', (_, url) => shell.openExternal(url));
 
+function parseHistoryFiles(filePaths) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./historyWorker.node.js', import.meta.url), { workerData: filePaths });
+    let settled = false;
+
+    worker.once('message', result => {
+      settled = true;
+      resolve(result);
+    });
+    worker.once('error', error => {
+      settled = true;
+      reject(error);
+    });
+    worker.once('exit', code => {
+      if (!settled) reject(new Error(`History worker exited before returning data (code ${code})`));
+    });
+  });
+}
+
 ipcMain.handle('scan-downloads-history', async () => {
   const downloadsDir = app.getPath('downloads');
   try {
     const files = await fs.promises.readdir(downloadsDir);
     const targetFiles = files.filter(f => /^(StreamingHistory.*|endsong.*)\.json$/i.test(f));
-    if (!targetFiles.length) return null;
+    if (!targetFiles.length) return { historyData: null, files: [], errors: [] };
 
-    const allRecords = [];
-    for (const file of targetFiles) {
-      const content = await fs.promises.readFile(path.join(downloadsDir, file), 'utf8');
-      const json = JSON.parse(content);
-      if (Array.isArray(json)) allRecords.push(...json);
-    }
-    return { count: allRecords.length, records: allRecords, files: targetFiles };
+    return await parseHistoryFiles(targetFiles.map(file => path.join(downloadsDir, file)));
   } catch (err) {
     return { error: err.message };
   }
@@ -168,13 +182,11 @@ ipcMain.handle('select-history-files', async () => {
   });
   if (result.canceled || !result.filePaths.length) return null;
 
-  const allRecords = [];
-  for (const filePath of result.filePaths) {
-    const content = await fs.promises.readFile(filePath, 'utf8');
-    const json = JSON.parse(content);
-    if (Array.isArray(json)) allRecords.push(...json);
+  try {
+    return await parseHistoryFiles(result.filePaths);
+  } catch (err) {
+    return { error: err.message };
   }
-  return { count: allRecords.length, records: allRecords, files: result.filePaths.map(p => path.basename(p)) };
 });
 
 app.whenReady().then(() => {

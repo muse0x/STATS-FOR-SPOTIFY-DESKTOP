@@ -19,8 +19,8 @@ import {
 import { mockUser, mockTracks, mockArtists, mockRecentlyPlayed } from './mockData.js';
 import {
   formatListeningTime,
-  parseSpotifyRecords,
   getStoredHistory,
+  storeHistoryData,
   clearStoredHistory,
   generateSampleHistory
 } from './historyParser.js';
@@ -34,7 +34,8 @@ const state = {
   loading: false,
   data: { tracks: [], artists: [], recent: [] },
   historyData: getStoredHistory(),
-  isHistoryModalOpen: false
+  isHistoryModalOpen: false,
+  historyImporting: false
 };
 
 const appElement = document.getElementById('app');
@@ -400,24 +401,65 @@ function render() {
   attachEvents();
 }
 
-async function processJsonFiles(files) {
-  const allRecords = [];
-  for (const file of files) {
-    try {
-      const text = await file.text();
-      const json = JSON.parse(text);
-      if (Array.isArray(json)) allRecords.push(...json);
-    } catch (e) {
-      console.warn('Error reading file:', file.name, e);
-    }
+function parseBrowserHistoryFiles(files) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./historyWorker.js', import.meta.url), { type: 'module' });
+
+    worker.addEventListener('message', ({ data }) => {
+      worker.terminate();
+      resolve(data);
+    }, { once: true });
+    worker.addEventListener('error', event => {
+      worker.terminate();
+      reject(new Error(event.message || 'History worker failed'));
+    }, { once: true });
+    worker.addEventListener('messageerror', () => {
+      worker.terminate();
+      reject(new Error('History worker returned invalid data'));
+    }, { once: true });
+
+    worker.postMessage({ files });
+  });
+}
+
+function saveHistoryData(historyData) {
+  state.historyData = historyData;
+  try {
+    storeHistoryData(historyData);
+    return true;
+  } catch (error) {
+    console.error('Failed to store Spotify history:', error);
+    return false;
   }
+}
 
-  if (!allRecords.length) return showToast('No valid streaming records found', 'error');
+async function importHistory(loadResult, successMessage) {
+  if (state.historyImporting) return showToast('A history import is already in progress', 'error');
 
-  state.historyData = parseSpotifyRecords(allRecords);
-  state.isHistoryModalOpen = false;
-  render();
-  showToast(`Imported ${state.historyData.totalPlays.toLocaleString()} plays (${formatListeningTime(state.historyData.totalMs)})!`);
+  state.historyImporting = true;
+  showToast('Processing Spotify history in the background...');
+  try {
+    const result = await loadResult();
+    if (!result) return;
+    if (result?.error) throw new Error(result.error);
+    if (!result?.historyData?.totalPlays) return showToast('No valid streaming records found', 'error');
+
+    const saved = saveHistoryData(result.historyData);
+    state.isHistoryModalOpen = false;
+    render();
+    showToast(`${successMessage(result)}${saved ? '' : ' History is available for this session but could not be saved.'}`, saved ? 'success' : 'error');
+  } catch (error) {
+    console.error('Failed to import Spotify history:', error);
+    showToast('Failed to import Spotify history. Check the selected JSON files and try again.', 'error');
+  } finally {
+    state.historyImporting = false;
+  }
+}
+
+function processJsonFiles(files) {
+  return importHistory(() => parseBrowserHistoryFiles(files), result =>
+    `Imported ${result.historyData.totalPlays.toLocaleString()} plays (${formatListeningTime(result.historyData.totalMs)})!`
+  );
 }
 
 function attachEvents() {
@@ -488,20 +530,14 @@ function attachEvents() {
   });
 
   document.getElementById('btn-scan-downloads')?.addEventListener('click', async () => {
-    showToast('Scanning Downloads folder...');
-    const res = await window.electronAPI?.scanDownloadsHistory?.();
-    if (res?.records?.length) {
-      state.historyData = parseSpotifyRecords(res.records);
-      state.isHistoryModalOpen = false;
-      render();
-      showToast(`Found ${res.files.length} files in Downloads! Imported ${state.historyData.totalPlays.toLocaleString()} plays.`);
-      return;
-    }
-    showToast('No Spotify JSON files found in Downloads', 'error');
+    await importHistory(
+      () => window.electronAPI?.scanDownloadsHistory?.(),
+      result => `Found ${result.files.length} files in Downloads! Imported ${result.historyData.totalPlays.toLocaleString()} plays.`
+    );
   });
 
   document.getElementById('btn-load-sample')?.addEventListener('click', () => {
-    state.historyData = generateSampleHistory(state.data.tracks, state.data.artists);
+    saveHistoryData(generateSampleHistory(state.data.tracks, state.data.artists));
     state.isHistoryModalOpen = false;
     render();
     showToast(`Loaded sample listening history: ${state.historyData.totalPlays.toLocaleString()} plays (${formatListeningTime(state.historyData.totalMs)})!`);
@@ -512,13 +548,10 @@ function attachEvents() {
 
   dropzone?.addEventListener('click', async () => {
     if (window.electronAPI?.selectHistoryFiles) {
-      const res = await window.electronAPI.selectHistoryFiles();
-      if (res?.records?.length) {
-        state.historyData = parseSpotifyRecords(res.records);
-        state.isHistoryModalOpen = false;
-        render();
-        showToast(`Imported ${state.historyData.totalPlays.toLocaleString()} plays from selected files!`);
-      }
+      await importHistory(
+        () => window.electronAPI.selectHistoryFiles(),
+        result => `Imported ${result.historyData.totalPlays.toLocaleString()} plays from ${result.files.length} files!`
+      );
       return;
     }
     fileInput?.click();
