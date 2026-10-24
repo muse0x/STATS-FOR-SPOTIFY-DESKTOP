@@ -1,94 +1,92 @@
-const historyStorageKey = 'spsv_extended_history';
+const HistoryStorageKey = 'spsv_extended_history';
 
-export const formatListeningTime = (ms) => {
-  if (!ms || ms < 60000) return '< 1m';
-  const hours = Math.floor(ms / 3600000);
-  const minutes = Math.floor((ms % 3600000) / 60000);
-  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+export const FormatListeningTime = (Milliseconds) => {
+  if (!Milliseconds || Milliseconds < 60000) return '< 1m';
+  const Hours = Math.floor(Milliseconds / 3600000);
+  const Minutes = Math.floor((Milliseconds % 3600000) / 60000);
+  return Hours > 0 ? `${Hours}h ${Minutes}m` : `${Minutes}m`;
 };
 
-export function parseSpotifyRecords(records) {
-  if (!Array.isArray(records) || !records.length) return null;
+export function ParseSpotifyRecords(Records) {
+  if (!Array.isArray(Records) || !Records.length) return null;
 
-  const tracks = {};
-  const artists = {};
-  let totalMs = 0;
-  let totalPlays = 0;
+  const Tracks = Object.create(null);
+  const Artists = Object.create(null);
+  let TotalMs = 0;
+  let TotalPlays = 0;
 
-  for (const item of records) {
-    const trackName = item.master_metadata_track_name || item.trackName;
-    const artistName = item.master_metadata_album_artist_name || item.artistName;
-    const ms = Number(item.ms_played ?? item.msPlayed ?? 0);
+  for (const Record of Records) {
+    const TrackName = Record.master_metadata_track_name || Record.trackName;
+    const ArtistName = Record.master_metadata_album_artist_name || Record.artistName;
+    const Milliseconds = Number(Record.ms_played ?? Record.msPlayed ?? 0);
 
-    if (!trackName || !artistName || ms < 15000) continue;
+    if (!TrackName || !ArtistName || Milliseconds < 15000) continue;
 
-    totalMs += ms;
-    totalPlays++;
+    TotalMs += Milliseconds;
+    TotalPlays++;
 
-    const trackKey = `${trackName.trim().toLowerCase()}___${artistName.trim().toLowerCase()}`;
-    if (!tracks[trackKey]) tracks[trackKey] = { name: trackName, artist: artistName, plays: 0, totalMs: 0 };
-    tracks[trackKey].plays++;
-    tracks[trackKey].totalMs += ms;
+    const ArtistKey = ArtistName.trim().toLowerCase();
+    const TrackKey = `${TrackName.trim().toLowerCase()}___${ArtistKey}`;
+    if (!Object.hasOwn(Tracks, TrackKey)) {
+      Tracks[TrackKey] = { name: TrackName, artist: ArtistName, plays: 0, totalMs: 0 };
+    }
+    Tracks[TrackKey].plays++;
+    Tracks[TrackKey].totalMs += Milliseconds;
 
-    const artistKey = artistName.trim().toLowerCase();
-    if (!artists[artistKey]) artists[artistKey] = { name: artistName, plays: 0, totalMs: 0 };
-    artists[artistKey].plays++;
-    artists[artistKey].totalMs += ms;
+    if (!Object.hasOwn(Artists, ArtistKey)) {
+      Artists[ArtistKey] = { name: ArtistName, plays: 0, totalMs: 0 };
+    }
+    Artists[ArtistKey].plays++;
+    Artists[ArtistKey].totalMs += Milliseconds;
   }
 
-  return { totalMs, totalPlays, tracks, artists, importedAt: Date.now() };
+  return { totalMs: TotalMs, totalPlays: TotalPlays, tracks: Tracks, artists: Artists, importedAt: Date.now() };
 }
 
-export function mergeSpotifyHistory(current, next) {
-  if (!next) return current;
-  if (!current) return next;
-
-  current.totalMs += next.totalMs;
-  current.totalPlays += next.totalPlays;
-
-  Object.entries(next.tracks).forEach(([key, track]) => {
-    const currentTrack = current.tracks[key];
-    if (!currentTrack) {
-      current.tracks[key] = track;
-      return;
+function MergeHistoryEntries(Current, Next) {
+  for (const Key in Next) {
+    if (!Object.hasOwn(Next, Key)) continue;
+    if (!Object.hasOwn(Current, Key)) {
+      Current[Key] = Next[Key];
+      continue;
     }
-    currentTrack.plays += track.plays;
-    currentTrack.totalMs += track.totalMs;
-  });
 
-  Object.entries(next.artists).forEach(([key, artist]) => {
-    const currentArtist = current.artists[key];
-    if (!currentArtist) {
-      current.artists[key] = artist;
-      return;
-    }
-    currentArtist.plays += artist.plays;
-    currentArtist.totalMs += artist.totalMs;
-  });
-
-  return current;
+    Current[Key].plays += Next[Key].plays;
+    Current[Key].totalMs += Next[Key].totalMs;
+  }
 }
 
-export function storeHistoryData(historyData) {
-  localStorage.setItem(historyStorageKey, JSON.stringify(historyData));
+export function MergeSpotifyHistory(Current, Next) {
+  if (!Next) return Current;
+  if (!Current) return Next;
+
+  Current.totalMs += Next.totalMs;
+  Current.totalPlays += Next.totalPlays;
+  MergeHistoryEntries(Current.tracks, Next.tracks);
+  MergeHistoryEntries(Current.artists, Next.artists);
+  return Current;
 }
 
-export function getStoredHistory() {
+export function StoreHistoryData(HistoryData) {
+  localStorage.setItem(HistoryStorageKey, JSON.stringify(HistoryData));
+}
+
+export function GetStoredHistory() {
   try {
-    const raw = localStorage.getItem(historyStorageKey);
-    return raw ? JSON.parse(raw) : null;
+    const RawHistory = localStorage.getItem(HistoryStorageKey);
+    return RawHistory ? JSON.parse(RawHistory) : null;
   } catch {
     return null;
   }
 }
 
-export function clearStoredHistory() {
-  localStorage.removeItem(historyStorageKey);
+export function ClearStoredHistory() {
+  localStorage.removeItem(HistoryStorageKey);
 }
 
-export function generateSampleHistory(tracksList, artistsList) {
-  const records = [];
-  const baseTracks = tracksList?.length ? tracksList : [
+export function GenerateSampleHistory(TracksList) {
+  const Records = [];
+  const BaseTracks = TracksList?.length ? TracksList : [
     { name: 'Cruel Summer', artists: [{ name: 'Taylor Swift' }], duration_ms: 178000 },
     { name: 'Starboy', artists: [{ name: 'The Weeknd' }], duration_ms: 230000 },
     { name: 'As It Was', artists: [{ name: 'Harry Styles' }], duration_ms: 167000 },
@@ -99,18 +97,18 @@ export function generateSampleHistory(tracksList, artistsList) {
     { name: 'Paint The Town Red', artists: [{ name: 'Doja Cat' }], duration_ms: 231000 },
   ];
 
-  baseTracks.forEach((track, index) => {
-    const artistName = track.artists?.[0]?.name || 'Artist';
-    const plays = Math.max(15, 280 - index * 28 + Math.floor(Math.random() * 20));
-    const duration = track.duration_ms || 180000;
-    for (let i = 0; i < plays; i++) {
-      records.push({
-        trackName: track.name,
-        artistName: artistName,
-        msPlayed: Math.floor(duration * (0.8 + Math.random() * 0.4))
+  BaseTracks.forEach((Track, Index) => {
+    const ArtistName = Track.artists?.[0]?.name || 'Artist';
+    const Plays = Math.max(15, 280 - Index * 28 + Math.floor(Math.random() * 20));
+    const Duration = Track.duration_ms || 180000;
+    for (let PlayIndex = 0; PlayIndex < Plays; PlayIndex++) {
+      Records.push({
+        trackName: Track.name,
+        artistName: ArtistName,
+        msPlayed: Math.floor(Duration * (0.8 + Math.random() * 0.4))
       });
     }
   });
 
-  return parseSpotifyRecords(records);
+  return ParseSpotifyRecords(Records);
 }

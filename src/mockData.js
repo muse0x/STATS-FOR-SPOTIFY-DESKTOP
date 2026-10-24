@@ -1,11 +1,11 @@
-export const mockUser = {
+export const MockUser = {
   id: 'spotify_user_demo',
   display_name: 'Alex Rivera',
   images: [{ url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80' }],
   followers: { total: 142 }
 };
 
-export const mockTracks = {
+export const MockTracks = {
   short_term: [
     {
       id: '1',
@@ -110,7 +110,7 @@ export const mockTracks = {
   ]
 };
 
-export const mockArtists = {
+export const MockArtists = {
   short_term: [
     {
       id: 'a1',
@@ -149,7 +149,7 @@ export const mockArtists = {
   long_term: []
 };
 
-export const mockRecentlyPlayed = [
+export const MockRecentlyPlayed = [
   {
     track: {
       id: 'r1',

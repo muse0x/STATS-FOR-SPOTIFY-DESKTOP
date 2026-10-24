@@ -1,16 +1,13 @@
-export const defaultClientId = '2c07c58bb20c4f529f5e262b85b6b1ba';
-export const statsRedirectUri = 'https://www.statsforspotify.com/login/callback';
+export const DefaultClientId = '2c07c58bb20c4f529f5e262b85b6b1ba';
+export const StatsRedirectUri = 'https://www.statsforspotify.com/login/callback';
 
-export const DEFAULT_CLIENT_ID = defaultClientId;
-export const STATS_REDIRECT_URI = statsRedirectUri;
+const TokenKey = 'spsv_access_token';
+const RefreshKey = 'spsv_refresh_token';
+const ExpiryKey = 'spsv_token_expiry';
+const VerifierKey = 'spsv_code_verifier';
+const UserCacheKey = 'spsv_cached_user';
 
-const tokenKey = 'spsv_access_token';
-const refreshKey = 'spsv_refresh_token';
-const expiryKey = 'spsv_token_expiry';
-const verifierKey = 'spsv_code_verifier';
-const userCacheKey = 'spsv_cached_user';
-
-export const defaultScopes = [
+export const DefaultScopes = [
   'user-top-read',
   'user-read-recently-played',
   'user-read-private',
@@ -19,176 +16,174 @@ export const defaultScopes = [
   'playlist-modify-private'
 ].join(' ');
 
-export const SCOPES = defaultScopes;
-
-export function generateRandomString(length) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
-  const bytes = crypto.getRandomValues(new Uint8Array(length));
-  return Array.from(bytes, byte => chars[byte % chars.length]).join('');
+export function GenerateRandomString(Length) {
+  const Characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  const RandomBytes = crypto.getRandomValues(new Uint8Array(Length));
+  return Array.from(RandomBytes, Byte => Characters[Byte % Characters.length]).join('');
 }
 
-export async function generateCodeChallenge(verifier) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  return btoa(String.fromCharCode(...new Uint8Array(digest)))
+export async function GenerateCodeChallenge(Verifier) {
+  const Digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(Verifier));
+  return btoa(String.fromCharCode(...new Uint8Array(Digest)))
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
 }
 
-export async function exchangeCodeForToken(code, redirectUri = statsRedirectUri, customClientId = defaultClientId) {
-  const verifier = localStorage.getItem(verifierKey);
-  if (!verifier) throw new Error('Code verifier not found in localStorage');
+export async function ExchangeCodeForToken(Code, RedirectUri = StatsRedirectUri, CustomClientId = DefaultClientId) {
+  const Verifier = localStorage.getItem(VerifierKey);
+  if (!Verifier) throw new Error('Code verifier not found in localStorage');
 
-  const res = await fetch('https://accounts.spotify.com/api/token', {
+  const Response = await fetch('https://accounts.spotify.com/api/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: customClientId,
+      client_id: CustomClientId,
       grant_type: 'authorization_code',
-      code,
-      redirect_uri: redirectUri,
-      code_verifier: verifier,
+      code: Code,
+      redirect_uri: RedirectUri,
+      code_verifier: Verifier,
     }),
   });
 
-  const data = await res.json();
-  if (!data.access_token) throw new Error(data.error_description || data.error || 'Failed to exchange token');
+  const Data = await Response.json();
+  if (!Data.access_token) throw new Error(Data.error_description || Data.error || 'Failed to exchange token');
 
-  localStorage.setItem(tokenKey, data.access_token);
-  if (data.refresh_token) localStorage.setItem(refreshKey, data.refresh_token);
-  localStorage.setItem(expiryKey, String(Date.now() + data.expires_in * 1000));
-  return data.access_token;
+  localStorage.setItem(TokenKey, Data.access_token);
+  if (Data.refresh_token) localStorage.setItem(RefreshKey, Data.refresh_token);
+  localStorage.setItem(ExpiryKey, String(Date.now() + Data.expires_in * 1000));
+  return Data.access_token;
 }
 
-export async function refreshAccessToken(customClientId = defaultClientId) {
-  const refreshToken = localStorage.getItem(refreshKey);
-  if (!refreshToken) return null;
+export async function RefreshAccessToken(CustomClientId = DefaultClientId) {
+  const RefreshToken = localStorage.getItem(RefreshKey);
+  if (!RefreshToken) return null;
 
   try {
-    const res = await fetch('https://accounts.spotify.com/api/token', {
+    const Response = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-        client_id: customClientId,
+        refresh_token: RefreshToken,
+        client_id: CustomClientId,
       })
     });
 
-    const data = await res.json();
-    if (!data.access_token) return null;
+    const Data = await Response.json();
+    if (!Data.access_token) return null;
 
-    localStorage.setItem(tokenKey, data.access_token);
-    if (data.refresh_token) localStorage.setItem(refreshKey, data.refresh_token);
-    localStorage.setItem(expiryKey, String(Date.now() + data.expires_in * 1000));
-    return data.access_token;
+    localStorage.setItem(TokenKey, Data.access_token);
+    if (Data.refresh_token) localStorage.setItem(RefreshKey, Data.refresh_token);
+    localStorage.setItem(ExpiryKey, String(Date.now() + Data.expires_in * 1000));
+    return Data.access_token;
   } catch {
     return null;
   }
 }
 
-export async function handleAuthCallback() {
-  const code = new URLSearchParams(window.location.search).get('code');
-  if (!code) return null;
+export async function HandleAuthCallback() {
+  const Code = new URLSearchParams(window.location.search).get('code');
+  if (!Code) return null;
 
   try {
-    const token = await exchangeCodeForToken(code, statsRedirectUri, defaultClientId);
+    const Token = await ExchangeCodeForToken(Code, StatsRedirectUri, DefaultClientId);
     window.history.replaceState({}, document.title, window.location.pathname);
-    return token;
-  } catch (err) {
-    console.error('Callback auth error:', err);
+    return Token;
+  } catch (Error) {
+    console.error('Callback auth error:', Error);
     return null;
   }
 }
 
-export function getAccessToken() {
-  const token = localStorage.getItem(tokenKey);
-  const expiry = Number(localStorage.getItem(expiryKey) || 0);
-  return token && Date.now() < expiry ? token : null;
+function GetAccessToken() {
+  const Token = localStorage.getItem(TokenKey);
+  const Expiry = Number(localStorage.getItem(ExpiryKey) || 0);
+  return Token && Date.now() < Expiry ? Token : null;
 }
 
-export async function getValidAccessToken() {
-  const token = getAccessToken();
-  if (token) return token;
-  return refreshAccessToken();
+export async function GetValidAccessToken() {
+  const Token = GetAccessToken();
+  if (Token) return Token;
+  return RefreshAccessToken();
 }
 
-export function getCachedUser() {
+export function GetCachedUser() {
   try {
-    const raw = localStorage.getItem(userCacheKey);
-    return raw ? JSON.parse(raw) : null;
+    const RawUser = localStorage.getItem(UserCacheKey);
+    return RawUser ? JSON.parse(RawUser) : null;
   } catch {
     return null;
   }
 }
 
-export function setCachedUser(user) {
-  if (user) localStorage.setItem(userCacheKey, JSON.stringify(user));
+function SetCachedUser(User) {
+  if (User) localStorage.setItem(UserCacheKey, JSON.stringify(User));
 }
 
-export function logout() {
-  [tokenKey, refreshKey, expiryKey, verifierKey, userCacheKey].forEach(key => localStorage.removeItem(key));
+export function Logout() {
+  [TokenKey, RefreshKey, ExpiryKey, VerifierKey, UserCacheKey].forEach(Key => localStorage.removeItem(Key));
   window.location.reload();
 }
 
-async function fetchSpotifyApi(endpoint) {
-  let token = await getValidAccessToken();
-  if (!token) throw new Error('Not authenticated');
+async function FetchSpotifyApi(Endpoint) {
+  let Token = await GetValidAccessToken();
+  if (!Token) throw new Error('Not authenticated');
 
-  let res = await fetch(`https://api.spotify.com/v1${endpoint}`, {
-    headers: { Authorization: `Bearer ${token}` }
+  let Response = await fetch(`https://api.spotify.com/v1${Endpoint}`, {
+    headers: { Authorization: `Bearer ${Token}` }
   });
 
-  if (res.status === 401) {
-    token = await refreshAccessToken();
-    if (token) {
-      res = await fetch(`https://api.spotify.com/v1${endpoint}`, {
-        headers: { Authorization: `Bearer ${token}` }
+  if (Response.status === 401) {
+    Token = await RefreshAccessToken();
+    if (Token) {
+      Response = await fetch(`https://api.spotify.com/v1${Endpoint}`, {
+        headers: { Authorization: `Bearer ${Token}` }
       });
     }
   }
 
-  if (res.status === 401) {
-    logout();
+  if (Response.status === 401) {
+    Logout();
     throw new Error('Spotify session expired. Please re-login.');
   }
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Spotify API error: ${res.status}`);
+  if (!Response.ok) {
+    const ErrorData = await Response.json().catch(() => ({}));
+    throw new Error(ErrorData.error?.message || `Spotify API error: ${Response.status}`);
   }
 
-  return res.json();
+  return Response.json();
 }
 
-export const getCurrentUser = async () => {
-  const user = await fetchSpotifyApi('/me');
-  setCachedUser(user);
-  return user;
+export const GetCurrentUser = async () => {
+  const User = await FetchSpotifyApi('/me');
+  SetCachedUser(User);
+  return User;
 };
 
-export const getTopTracks = (timeRange = 'short_term', limit = 50) => fetchSpotifyApi(`/me/top/tracks?time_range=${timeRange}&limit=${limit}`);
-export const getTopArtists = (timeRange = 'short_term', limit = 50) => fetchSpotifyApi(`/me/top/artists?time_range=${timeRange}&limit=${limit}`);
-export const getRecentlyPlayed = (limit = 50) => fetchSpotifyApi(`/me/player/recently-played?limit=${limit}`);
+export const GetTopTracks = (TimeRange = 'short_term', Limit = 50) => FetchSpotifyApi(`/me/top/tracks?time_range=${TimeRange}&limit=${Limit}`);
+export const GetTopArtists = (TimeRange = 'short_term', Limit = 50) => FetchSpotifyApi(`/me/top/artists?time_range=${TimeRange}&limit=${Limit}`);
+export const GetRecentlyPlayed = (Limit = 50) => FetchSpotifyApi(`/me/player/recently-played?limit=${Limit}`);
 
-export async function createPlaylistWithTracks(userId, name, uris) {
-  const token = await getValidAccessToken();
-  const res = await fetch(`https://api.spotify.com/v1/users/${userId}/playlists`, {
+export async function CreatePlaylistWithTracks(UserId, PlaylistName, TrackUris) {
+  const Token = await GetValidAccessToken();
+  const Response = await fetch(`https://api.spotify.com/v1/users/${UserId}/playlists`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, description: 'Created with Stats for Spotify Desktop App', public: false })
+    headers: { Authorization: `Bearer ${Token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: PlaylistName, description: 'Created with Stats for Spotify Desktop App', public: false })
   });
 
-  if (!res.ok) throw new Error('Could not create playlist');
-  const playlist = await res.json();
+  if (!Response.ok) throw new Error('Could not create playlist');
+  const Playlist = await Response.json();
 
-  if (uris?.length) {
-    await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, {
+  if (TrackUris?.length) {
+    await fetch(`https://api.spotify.com/v1/playlists/${Playlist.id}/tracks`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uris: uris.slice(0, 100) })
+      headers: { Authorization: `Bearer ${Token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uris: TrackUris.slice(0, 100) })
     });
   }
 
-  return playlist;
+  return Playlist;
 }

@@ -1,20 +1,18 @@
-import { app, BrowserWindow, shell, ipcMain, dialog } from 'electron';
-import path from 'path';
-import http from 'http';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+import { app as App, BrowserWindow, shell as Shell, ipcMain as IpcMain, dialog as Dialog } from 'electron';
+import Path from 'path';
+import FileSystem from 'fs';
+import { fileURLToPath as FileURLToPath } from 'url';
 import { Worker } from 'node:worker_threads';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = Path.dirname(FileURLToPath(import.meta.url));
 
-let mainWindow = null;
-let loopbackServer = null;
+let MainWindow = null;
 
-const statsClientId = '2c07c58bb20c4f529f5e262b85b6b1ba';
-const statsRedirectUri = 'https://www.statsforspotify.com/login/callback';
+const StatsClientId = '2c07c58bb20c4f529f5e262b85b6b1ba';
+const StatsRedirectUri = 'https://www.statsforspotify.com/login/callback';
 
-function createWindow() {
-  mainWindow = new BrowserWindow({
+function CreateWindow() {
+  MainWindow = new BrowserWindow({
     width: 1220,
     height: 840,
     minWidth: 800,
@@ -25,79 +23,25 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.cjs'),
+      preload: Path.join(__dirname, 'preload.cjs'),
       partition: 'persist:spotify_session',
     },
   });
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+  MainWindow.webContents.setWindowOpenHandler(({ url: Url }) => {
+    Shell.openExternal(Url);
     return { action: 'deny' };
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'dist/index.html'));
+  MainWindow.loadFile(Path.join(__dirname, 'dist/index.html'));
 }
 
-const closeLoopback = () => {
-  if (!loopbackServer) return;
-  try { loopbackServer.close(); } catch {}
-  loopbackServer = null;
-};
-
-ipcMain.handle('open-browser-auth', (event, { clientId, scopes, challenge }) => {
-  return new Promise((resolve, reject) => {
-    closeLoopback();
-
-    loopbackServer = http.createServer((req, res) => {
-      try {
-        const reqUrl = new URL(req.url, `http://${req.headers.host}`);
-        if (reqUrl.pathname !== '/callback') return;
-
-        const code = reqUrl.searchParams.get('code');
-        const error = reqUrl.searchParams.get('error');
-
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(`
-          <!DOCTYPE html><html><head><meta charset="utf-8"><title>Stats for Spotify</title>
-          <style>body{background:#121212;color:#fff;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center;}
-          .badge{width:64px;height:64px;border-radius:50%;background:#1db954;display:flex;align-items:center;justify-content:center;font-size:32px;margin-bottom:20px;}</style></head>
-          <body><div class="badge">✓</div><h1>Xác thực thành công!</h1><p>Đang đồng bộ dữ liệu vào App. Bạn có thể đóng tab này.</p>
-          <script>setTimeout(()=>window.close(),1500);</script></body></html>
-        `);
-
-        closeLoopback();
-        mainWindow?.focus();
-        if (code) return resolve({ code });
-        reject(new Error(error || 'User cancelled authorization'));
-      } catch (err) {
-        res.writeHead(500);
-        res.end('Server error');
-        reject(err);
-      }
-    });
-
-    loopbackServer.listen(8888, '127.0.0.1', () => {
-      const params = new URLSearchParams({
-        client_id: clientId,
-        response_type: 'code',
-        redirect_uri: 'http://127.0.0.1:8888/callback',
-        scope: scopes,
-        code_challenge_method: 'S256',
-        code_challenge: challenge,
-      });
-      shell.openExternal(`https://accounts.spotify.com/authorize?${params.toString()}`);
-    });
-
-    loopbackServer.on('error', reject);
-  });
-});
-
-ipcMain.handle('open-popup-auth', (event, { scopes, challenge }) => {
-  return new Promise((resolve, reject) => {
-    const authWindow = new BrowserWindow({
+IpcMain.handle('open-popup-auth', (Event, { scopes: Scopes, challenge: Challenge }) => {
+  return new Promise((Resolve, Reject) => {
+    const AuthWindow = new BrowserWindow({
       width: 500,
       height: 700,
-      parent: mainWindow,
+      parent: MainWindow,
       modal: true,
       backgroundColor: '#121212',
       title: 'Spotify Authorization',
@@ -109,97 +53,96 @@ ipcMain.handle('open-popup-auth', (event, { scopes, challenge }) => {
       }
     });
 
-    authWindow.webContents.session.webRequest.onBeforeRequest(
+    AuthWindow.webContents.session.webRequest.onBeforeRequest(
       { urls: ['https://www.statsforspotify.com/login/callback*'] },
-      (details, callback) => {
+      (Details, Callback) => {
         try {
-          const parsed = new URL(details.url);
-          const code = parsed.searchParams.get('code');
-          const error = parsed.searchParams.get('error');
+          const ParsedURL = new URL(Details.url);
+          const Code = ParsedURL.searchParams.get('code');
+          const AuthError = ParsedURL.searchParams.get('error');
 
-          authWindow.close();
-          callback({ cancel: true });
-          if (code) return resolve({ code });
-          reject(new Error(error || 'Cancelled'));
-        } catch (e) {
-          reject(e);
+          AuthWindow.close();
+          Callback({ cancel: true });
+          if (Code) return Resolve({ code: Code });
+          Reject(new Error(AuthError || 'Cancelled'));
+        } catch (RequestError) {
+          Reject(RequestError);
         }
       }
     );
 
-    const params = new URLSearchParams({
-      client_id: statsClientId,
+    const Params = new URLSearchParams({
+      client_id: StatsClientId,
       response_type: 'code',
-      redirect_uri: statsRedirectUri,
-      scope: scopes,
+      redirect_uri: StatsRedirectUri,
+      scope: Scopes,
       code_challenge_method: 'S256',
-      code_challenge: challenge,
+      code_challenge: Challenge,
     });
 
-    authWindow.loadURL(`https://accounts.spotify.com/authorize?${params.toString()}`);
+    AuthWindow.loadURL(`https://accounts.spotify.com/authorize?${Params.toString()}`);
   });
 });
 
-ipcMain.handle('open-external-url', (_, url) => shell.openExternal(url));
+IpcMain.handle('open-external-url', (Event, Url) => Shell.openExternal(Url));
 
-function parseHistoryFiles(filePaths) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./historyWorker.node.js', import.meta.url), { workerData: filePaths });
-    let settled = false;
+function ParseHistoryFiles(FilePaths) {
+  return new Promise((Resolve, Reject) => {
+    const HistoryWorker = new Worker(new URL('./historyWorker.node.js', import.meta.url), { workerData: FilePaths });
+    let Settled = false;
 
-    worker.once('message', result => {
-      settled = true;
-      resolve(result);
+    HistoryWorker.once('message', Result => {
+      Settled = true;
+      Resolve(Result);
     });
-    worker.once('error', error => {
-      settled = true;
-      reject(error);
+    HistoryWorker.once('error', WorkerError => {
+      Settled = true;
+      Reject(WorkerError);
     });
-    worker.once('exit', code => {
-      if (!settled) reject(new Error(`History worker exited before returning data (code ${code})`));
+    HistoryWorker.once('exit', Code => {
+      if (!Settled) Reject(new Error(`History worker exited before returning data (code ${Code})`));
     });
   });
 }
 
-ipcMain.handle('scan-downloads-history', async () => {
-  const downloadsDir = app.getPath('downloads');
+IpcMain.handle('scan-downloads-history', async () => {
+  const DownloadsDirectory = App.getPath('downloads');
   try {
-    const files = await fs.promises.readdir(downloadsDir);
-    const targetFiles = files.filter(f => /^(StreamingHistory.*|endsong.*)\.json$/i.test(f));
-    if (!targetFiles.length) return { historyData: null, files: [], errors: [] };
+    const FileNames = await FileSystem.promises.readdir(DownloadsDirectory);
+    const TargetFiles = FileNames.filter(FileName => /^(StreamingHistory.*|endsong.*)\.json$/i.test(FileName));
+    if (!TargetFiles.length) return { historyData: null, files: [], errors: [] };
 
-    return await parseHistoryFiles(targetFiles.map(file => path.join(downloadsDir, file)));
-  } catch (err) {
-    return { error: err.message };
+    return await ParseHistoryFiles(TargetFiles.map(FileName => Path.join(DownloadsDirectory, FileName)));
+  } catch (ScanError) {
+    return { error: ScanError.message };
   }
 });
 
-ipcMain.handle('select-history-files', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+IpcMain.handle('select-history-files', async () => {
+  const Selection = await Dialog.showOpenDialog(MainWindow, {
     title: 'Select Spotify Streaming History JSON Files',
     properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'JSON Files', extensions: ['json'] }]
   });
-  if (result.canceled || !result.filePaths.length) return null;
+  if (Selection.canceled || !Selection.filePaths.length) return null;
 
   try {
-    return await parseHistoryFiles(result.filePaths);
-  } catch (err) {
-    return { error: err.message };
+    return await ParseHistoryFiles(Selection.filePaths);
+  } catch (SelectionError) {
+    return { error: SelectionError.message };
   }
 });
 
-app.whenReady().then(() => {
-  if (app.userAgentFallback) {
-    app.userAgentFallback = app.userAgentFallback.replace(/Electron\/\S+\s?/, '');
+App.whenReady().then(() => {
+  if (App.userAgentFallback) {
+    App.userAgentFallback = App.userAgentFallback.replace(/Electron\/\S+\s?/, '');
   }
-  createWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  CreateWindow();
+  App.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) CreateWindow();
   });
 });
 
-app.on('window-all-closed', () => {
-  closeLoopback();
-  if (process.platform !== 'darwin') app.quit();
+App.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') App.quit();
 });

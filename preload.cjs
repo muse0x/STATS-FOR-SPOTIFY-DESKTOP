@@ -1,9 +1,8 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge: ContextBridge, ipcRenderer: IpcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('electronAPI', {
-  openBrowserAuth: (payload) => ipcRenderer.invoke('open-browser-auth', payload),
-  openPopupAuth: (payload) => ipcRenderer.invoke('open-popup-auth', payload),
-  openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
-  scanDownloadsHistory: () => ipcRenderer.invoke('scan-downloads-history'),
-  selectHistoryFiles: () => ipcRenderer.invoke('select-history-files'),
+ContextBridge.exposeInMainWorld('electronAPI', {
+  openPopupAuth: (Payload) => IpcRenderer.invoke('open-popup-auth', Payload),
+  openExternalUrl: (Url) => IpcRenderer.invoke('open-external-url', Url),
+  scanDownloadsHistory: () => IpcRenderer.invoke('scan-downloads-history'),
+  selectHistoryFiles: () => IpcRenderer.invoke('select-history-files'),
 });

@@ -1,24 +1,24 @@
-import { readFile } from 'node:fs/promises';
-import { basename } from 'node:path';
-import { parentPort, workerData } from 'node:worker_threads';
-import { mergeSpotifyHistory, parseSpotifyRecords } from './src/historyParser.js';
+import { readFile as ReadFile } from 'node:fs/promises';
+import { basename as BaseName } from 'node:path';
+import { parentPort as ParentPort, workerData as WorkerData } from 'node:worker_threads';
+import { MergeSpotifyHistory, ParseSpotifyRecords } from './src/historyParser.js';
 
-let historyData = null;
-const files = [];
-const errors = [];
+let HistoryData = null;
+const Files = [];
+const Errors = [];
 
-for (const filePath of workerData) {
+for (const FilePath of WorkerData) {
   try {
-    const records = JSON.parse(await readFile(filePath, 'utf8'));
-    if (!Array.isArray(records)) {
-      errors.push(basename(filePath));
+    const Records = JSON.parse(await ReadFile(FilePath, 'utf8'));
+    if (!Array.isArray(Records)) {
+      Errors.push(BaseName(FilePath));
       continue;
     }
-    historyData = mergeSpotifyHistory(historyData, parseSpotifyRecords(records));
-    files.push(basename(filePath));
+    HistoryData = MergeSpotifyHistory(HistoryData, ParseSpotifyRecords(Records));
+    Files.push(BaseName(FilePath));
   } catch {
-    errors.push(basename(filePath));
+    Errors.push(BaseName(FilePath));
   }
 }
 
-parentPort?.postMessage({ historyData, files, errors });
+ParentPort?.postMessage({ historyData: HistoryData, files: Files, errors: Errors });

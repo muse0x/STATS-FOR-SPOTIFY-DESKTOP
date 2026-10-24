@@ -1,23 +1,23 @@
-import { mergeSpotifyHistory, parseSpotifyRecords } from './historyParser.js';
+import { MergeSpotifyHistory, ParseSpotifyRecords } from './historyParser.js';
 
-self.addEventListener('message', async ({ data }) => {
-  let historyData = null;
-  const files = [];
-  const errors = [];
+self.addEventListener('message', async ({ data: Data }) => {
+  let HistoryData = null;
+  const Files = [];
+  const Errors = [];
 
-  for (const file of data.files) {
+  for (const File of Data.files) {
     try {
-      const records = JSON.parse(await file.text());
-      if (!Array.isArray(records)) {
-        errors.push(file.name);
+      const Records = JSON.parse(await File.text());
+      if (!Array.isArray(Records)) {
+        Errors.push(File.name);
         continue;
       }
-      historyData = mergeSpotifyHistory(historyData, parseSpotifyRecords(records));
-      files.push(file.name);
+      HistoryData = MergeSpotifyHistory(HistoryData, ParseSpotifyRecords(Records));
+      Files.push(File.name);
     } catch {
-      errors.push(file.name);
+      Errors.push(File.name);
     }
   }
 
-  self.postMessage({ historyData, files, errors });
+  self.postMessage({ historyData: HistoryData, files: Files, errors: Errors });
 });

@@ -1,206 +1,263 @@
 import './style.css';
 import {
-  defaultClientId,
-  statsRedirectUri,
-  defaultScopes,
-  generateRandomString,
-  generateCodeChallenge,
-  exchangeCodeForToken,
-  handleAuthCallback,
-  getValidAccessToken,
-  getCachedUser,
-  logout,
-  getCurrentUser,
-  getTopTracks,
-  getTopArtists,
-  getRecentlyPlayed,
-  createPlaylistWithTracks
+  DefaultClientId,
+  StatsRedirectUri,
+  DefaultScopes,
+  GenerateRandomString,
+  GenerateCodeChallenge,
+  ExchangeCodeForToken,
+  HandleAuthCallback,
+  GetValidAccessToken,
+  GetCachedUser,
+  Logout,
+  GetCurrentUser,
+  GetTopTracks,
+  GetTopArtists,
+  GetRecentlyPlayed,
+  CreatePlaylistWithTracks
 } from './spotify.js';
-import { mockUser, mockTracks, mockArtists, mockRecentlyPlayed } from './mockData.js';
+import { MockUser, MockTracks, MockArtists, MockRecentlyPlayed } from './mockData.js';
 import {
-  formatListeningTime,
-  getStoredHistory,
-  storeHistoryData,
-  clearStoredHistory,
-  generateSampleHistory
+  FormatListeningTime,
+  GetStoredHistory,
+  StoreHistoryData,
+  ClearStoredHistory,
+  GenerateSampleHistory
 } from './historyParser.js';
 
-const state = {
-  isLoggedIn: false,
-  isDemoMode: false,
-  currentUser: null,
-  activeTab: 'tracks',
-  timeRange: 'short_term',
-  loading: false,
-  data: { tracks: [], artists: [], recent: [] },
-  historyData: getStoredHistory(),
-  isHistoryModalOpen: false,
-  historyImporting: false
+const State = {
+  IsLoggedIn: false,
+  IsDemoMode: false,
+  CurrentUser: null,
+  ActiveTab: 'tracks',
+  TimeRange: 'short_term',
+  Loading: false,
+  Data: { Tracks: [], Artists: [], Recent: [] },
+  HistoryData: GetStoredHistory(),
+  IsHistoryModalOpen: false,
+  HistoryImporting: false
 };
 
-const appElement = document.getElementById('app');
+const AppElement = document.getElementById('app');
+const DataCache = new Map();
+let DataLoadRequestId = 0;
 
-const formatDuration = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}`;
+const FormatDuration = (Milliseconds) => `${Math.floor(Milliseconds / 60000)}:${String(Math.floor((Milliseconds % 60000) / 1000)).padStart(2, '0')}`;
 
-function formatTimeAgo(dateString) {
-  const diffMinutes = Math.floor((Date.now() - new Date(dateString).getTime()) / 60000);
-  if (diffMinutes < 1) return 'Just now';
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  return diffHours < 24 ? `${diffHours}h ago` : `${Math.floor(diffHours / 24)}d ago`;
+function FormatTimeAgo(DateString) {
+  const DiffMinutes = Math.floor((Date.now() - new Date(DateString).getTime()) / 60000);
+  if (DiffMinutes < 1) return 'Just now';
+  if (DiffMinutes < 60) return `${DiffMinutes}m ago`;
+  const DiffHours = Math.floor(DiffMinutes / 60);
+  return DiffHours < 24 ? `${DiffHours}h ago` : `${Math.floor(DiffHours / 24)}d ago`;
 }
 
-function showToast(message, type = 'success') {
-  let container = document.querySelector('.toast-container');
-  if (!container) {
-    container = document.createElement('div');
-    container.className = 'toast-container';
-    document.body.appendChild(container);
+function ShowToast(Message, Type = 'success') {
+  let Container = document.querySelector('.toast-container');
+  if (!Container) {
+    Container = document.createElement('div');
+    Container.className = 'toast-container';
+    document.body.appendChild(Container);
   }
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  toast.innerHTML = `<i class="fa-solid fa-circle-check"></i> <span>${message}</span>`;
-  container.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  const Toast = document.createElement('div');
+  Toast.className = `toast ${Type}`;
+  Toast.innerHTML = '<i class="fa-solid fa-circle-check"></i>';
+  const ToastMessage = document.createElement('span');
+  ToastMessage.textContent = Message;
+  Toast.appendChild(ToastMessage);
+  Container.appendChild(Toast);
+  setTimeout(() => Toast.remove(), 4000);
 }
 
-function calculateTopGenres(artists) {
-  const counts = {};
-  let total = 0;
-  artists.forEach(artist => (artist.genres || []).forEach(genre => {
-    counts[genre] = (counts[genre] || 0) + 1;
-    total++;
+function EscapeHtml(Value) {
+  return String(Value ?? '').replace(/[&<>"']/g, Character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[Character]);
+}
+
+function SafeExternalUrl(Value) {
+  try {
+    const Url = new URL(Value);
+    return Url.protocol === 'https:' ? Url.href : '#';
+  } catch {
+    return '#';
+  }
+}
+
+function CalculateTopGenres(Artists) {
+  const Counts = Object.create(null);
+  let Total = 0;
+  Artists.forEach(Artist => (Artist.genres || []).forEach(Genre => {
+    Counts[Genre] = (Counts[Genre] || 0) + 1;
+    Total++;
   }));
 
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
+  return Object.entries(Counts)
+    .sort((LeftGenre, RightGenre) => RightGenre[1] - LeftGenre[1])
     .slice(0, 15)
-    .map(([name, count]) => ({ name, count, percentage: Math.round((count / (total || 1)) * 100) }));
+    .map(([Name, Count]) => ({ Name, Count, Percentage: Math.round((Count / (Total || 1)) * 100) }));
 }
 
-async function loadData() {
-  state.loading = true;
-  render();
+async function LoadData({ Force = false } = {}) {
+  const RequestId = ++DataLoadRequestId;
+  const Tab = State.ActiveTab;
+  const DataKey = Tab === 'recent'
+    ? 'recent'
+    : `${Tab === 'tracks' ? 'tracks' : 'artists'}:${State.TimeRange}`;
+  const CacheKey = `${State.IsDemoMode ? 'demo' : 'spotify'}:${DataKey}`;
+  const DataProperty = { tracks: 'Tracks', artists: 'Artists', genres: 'Artists', recent: 'Recent' }[Tab];
+
+  if (!Force && DataCache.has(CacheKey)) {
+    State.Data[DataProperty] = DataCache.get(CacheKey);
+    State.Loading = false;
+    Render();
+    return true;
+  }
+
+  State.Loading = true;
+  Render();
 
   try {
-    if (state.isDemoMode) {
-      await new Promise(resolve => setTimeout(resolve, 150));
-      state.data.tracks = mockTracks[state.timeRange] || mockTracks.short_term;
-      state.data.artists = mockArtists[state.timeRange] || mockArtists.short_term;
-      state.data.recent = mockRecentlyPlayed;
-    } else {
-      const loaders = {
-        tracks: async () => { state.data.tracks = (await getTopTracks(state.timeRange, 50)).items || []; },
-        artists: async () => { state.data.artists = (await getTopArtists(state.timeRange, 50)).items || []; },
-        genres: async () => { state.data.artists = (await getTopArtists(state.timeRange, 50)).items || []; },
-        recent: async () => { state.data.recent = (await getRecentlyPlayed(50)).items || []; },
-      };
-      await loaders[state.activeTab]?.();
-    }
-  } catch (err) {
-    console.error('Error fetching data:', err);
-    showToast(`Failed to load stats: ${err.message}`, 'error');
+    if (State.IsDemoMode) await new Promise(Resolve => setTimeout(Resolve, 150));
+
+    const Loaders = State.IsDemoMode ? {
+      tracks: () => MockTracks[State.TimeRange] || MockTracks.short_term,
+      artists: () => MockArtists[State.TimeRange] || MockArtists.short_term,
+      genres: () => MockArtists[State.TimeRange] || MockArtists.short_term,
+      recent: () => MockRecentlyPlayed
+    } : {
+      tracks: () => GetTopTracks(State.TimeRange, 50),
+      artists: () => GetTopArtists(State.TimeRange, 50),
+      genres: () => GetTopArtists(State.TimeRange, 50),
+      recent: () => GetRecentlyPlayed(50)
+    };
+    const Response = await Loaders[Tab]();
+    const Items = State.IsDemoMode ? Response : Response?.items || [];
+
+    if (RequestId !== DataLoadRequestId) return false;
+    DataCache.set(CacheKey, Items);
+    State.Data[DataProperty] = Items;
+    return true;
+  } catch (RequestError) {
+    if (RequestId !== DataLoadRequestId) return false;
+    console.error('Error fetching data:', RequestError);
+    ShowToast(`Failed to load stats: ${RequestError.message}`, 'error');
+    return false;
   } finally {
-    state.loading = false;
-    render();
+    if (RequestId === DataLoadRequestId) {
+      State.Loading = false;
+      Render();
+    }
   }
 }
 
-async function handleCreatePlaylist() {
-  if (state.isDemoMode) return showToast('Created Spotify Playlist "Top Tracks (4 Weeks)" [Demo Mode]');
-  if (!state.currentUser || !state.data.tracks.length) return;
+async function HandleCreatePlaylist() {
+  if (State.IsDemoMode) return ShowToast('Created Spotify Playlist "Top Tracks (4 Weeks)" [Demo Mode]');
+  if (!State.CurrentUser || !State.Data.Tracks.length) return;
 
-  const rangeLabels = { short_term: 'Last 4 Weeks', medium_term: 'Last 6 Months', long_term: 'All Time' };
+  const RangeLabels = { short_term: 'Last 4 Weeks', medium_term: 'Last 6 Months', long_term: 'All Time' };
   try {
-    const playlist = await createPlaylistWithTracks(
-      state.currentUser.id,
-      `Top Tracks (${rangeLabels[state.timeRange] || 'Top'}) — Stats for Spotify`,
-      state.data.tracks.map(track => track.uri).filter(Boolean)
+    const Playlist = await CreatePlaylistWithTracks(
+      State.CurrentUser.id,
+      `Top Tracks (${RangeLabels[State.TimeRange] || 'Top'}) — Stats for Spotify`,
+      State.Data.Tracks.map(Track => Track.uri).filter(Boolean)
     );
-    showToast(`Created Playlist "${playlist.name}" with ${state.data.tracks.length} tracks!`);
-  } catch (err) {
-    showToast(`Failed to create playlist: ${err.message}`, 'error');
+    ShowToast(`Created Playlist "${Playlist.name}" with ${State.Data.Tracks.length} tracks!`);
+  } catch (RequestError) {
+    ShowToast(`Failed to create playlist: ${RequestError.message}`, 'error');
   }
 }
 
-const renderRank = (index) => `<span class="item-rank ${index < 3 ? `top-${index + 1}` : ''}">${index + 1}</span>`;
+const RenderRank = (Index, Highlight = true) => `<span class="item-rank ${Highlight && Index < 3 ? `top-${Index + 1}` : ''}">${Index + 1}</span>`;
 
-const tabRenderers = {
+function RenderEmptyState(Message) {
+  return `<p style="color:var(--text-muted); padding:2rem; text-align:center;">${EscapeHtml(Message)}</p>`;
+}
+
+function RenderHistoryStats(Stat) {
+  return `
+    <div class="item-extra-stats">
+      <span class="stats-plays"><i class="fa-solid fa-play"></i> ${Stat.plays} plays</span>
+      <span class="stats-time"><i class="fa-regular fa-clock"></i> ${FormatListeningTime(Stat.totalMs)}</span>
+    </div>
+  `;
+}
+
+function RenderListItem({ Url, ImageUrl, Name, Subtitle, Rank, ImageClass = 'item-image', Extra = '' }) {
+  return `
+    <a class="list-item" href="${EscapeHtml(SafeExternalUrl(Url))}" target="_blank" rel="noreferrer">
+      ${Rank || ''}
+      <img class="${ImageClass}" loading="lazy" decoding="async" src="${EscapeHtml(SafeExternalUrl(ImageUrl))}" alt="${EscapeHtml(Name)}" />
+      <div class="item-info">
+        <div class="item-title">${EscapeHtml(Name)}</div>
+        <div class="item-subtitle">${Subtitle}</div>
+      </div>
+      ${Extra}
+    </a>
+  `;
+}
+
+const TabRenderers = {
   tracks: () => `
     <div class="list-container">
-      ${!state.data.tracks.length ? '<p style="color:var(--text-muted); padding:2rem; text-align:center;">No tracks found.</p>' : ''}
-      ${state.data.tracks.map((track, index) => {
-        const key = `${track.name.trim().toLowerCase()}___${track.artists?.[0]?.name?.trim().toLowerCase()}`;
-        const stat = state.historyData?.tracks?.[key];
-        return `
-          <a class="list-item" href="${track.external_urls?.spotify || '#'}" target="_blank" rel="noreferrer">
-            ${renderRank(index)}
-            <img class="item-image" src="${track.album?.images?.[0]?.url || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=100'}" alt="${track.name}" />
-            <div class="item-info">
-              <div class="item-title">${track.name}</div>
-              <div class="item-subtitle">${(track.artists || []).map(artist => artist.name).join(', ')}</div>
-            </div>
-            ${stat ? `
-              <div class="item-extra-stats">
-                <span class="stats-plays"><i class="fa-solid fa-play"></i> ${stat.plays} plays</span>
-                <span class="stats-time"><i class="fa-regular fa-clock"></i> ${formatListeningTime(stat.totalMs)}</span>
-              </div>
-            ` : `
-              <div class="item-extra">${formatDuration(track.duration_ms)}</div>
-            `}
-          </a>
-        `;
+      ${State.Data.Tracks.length ? '' : RenderEmptyState('No tracks found.')}
+      ${State.Data.Tracks.map((Track, Index) => {
+        const TrackKey = `${Track.name.trim().toLowerCase()}___${Track.artists?.[0]?.name?.trim().toLowerCase()}`;
+        const Stat = State.HistoryData?.tracks?.[TrackKey];
+        const Extra = Stat ? RenderHistoryStats(Stat) : `<div class="item-extra">${FormatDuration(Track.duration_ms)}</div>`;
+        return RenderListItem({
+          Url: Track.external_urls?.spotify,
+          ImageUrl: Track.album?.images?.[0]?.url || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=100',
+          Name: Track.name,
+          Subtitle: (Track.artists || []).map(Artist => EscapeHtml(Artist.name)).join(', '),
+          Rank: RenderRank(Index),
+          Extra
+        });
       }).join('')}
     </div>
   `,
   artists: () => `
     <div class="list-container">
-      ${!state.data.artists.length ? '<p style="color:var(--text-muted); padding:2rem; text-align:center;">No artists found.</p>' : ''}
-      ${state.data.artists.map((artist, index) => {
-        const stat = state.historyData?.artists?.[artist.name.trim().toLowerCase()];
-        return `
-          <a class="list-item" href="${artist.external_urls?.spotify || '#'}" target="_blank" rel="noreferrer">
-            ${renderRank(index)}
-            <img class="item-image circle" src="${artist.images?.[0]?.url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100'}" alt="${artist.name}" />
-            <div class="item-info">
-              <div class="item-title">${artist.name}</div>
-              <div class="item-subtitle">${(artist.genres || []).slice(0, 3).map(genre => `<span class="item-genres-pill">${genre}</span>`).join('')}</div>
-            </div>
-            ${stat ? `
-              <div class="item-extra-stats">
-                <span class="stats-plays"><i class="fa-solid fa-play"></i> ${stat.plays} plays</span>
-                <span class="stats-time"><i class="fa-regular fa-clock"></i> ${formatListeningTime(stat.totalMs)}</span>
-              </div>
-            ` : `
-              <div class="item-extra"><i class="fa-solid fa-fire" style="color:var(--spotify-green); margin-right:4px;"></i>${artist.popularity || 0}%</div>
-            `}
-          </a>
-        `;
+      ${State.Data.Artists.length ? '' : RenderEmptyState('No artists found.')}
+      ${State.Data.Artists.map((Artist, Index) => {
+        const Stat = State.HistoryData?.artists?.[Artist.name.trim().toLowerCase()];
+        const Extra = Stat
+          ? RenderHistoryStats(Stat)
+          : `<div class="item-extra"><i class="fa-solid fa-fire" style="color:var(--spotify-green); margin-right:4px;"></i>${Artist.popularity || 0}%</div>`;
+        return RenderListItem({
+          Url: Artist.external_urls?.spotify,
+          ImageUrl: Artist.images?.[0]?.url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100',
+          Name: Artist.name,
+          Subtitle: (Artist.genres || []).slice(0, 3).map(Genre => `<span class="item-genres-pill">${EscapeHtml(Genre)}</span>`).join(''),
+          Rank: RenderRank(Index),
+          ImageClass: 'item-image circle',
+          Extra
+        });
       }).join('')}
     </div>
   `,
   genres: () => {
-    const genres = calculateTopGenres(state.data.artists);
+    const Genres = CalculateTopGenres(State.Data.Artists);
     return `
       <div class="genres-grid">
-        ${!genres.length ? '<p style="color:var(--text-muted); padding:2rem; text-align:center;">No genres calculated.</p>' : ''}
-        ${genres.map(genre => {
-          let genreTotalMs = 0;
-          if (state.historyData) {
-            state.data.artists
-              .filter(artist => (artist.genres || []).includes(genre.name))
-              .forEach(artist => {
-                const stat = state.historyData.artists?.[artist.name.trim().toLowerCase()];
-                if (stat) genreTotalMs += stat.totalMs;
-              });
-          }
+        ${Genres.length ? '' : RenderEmptyState('No genres calculated.')}
+        ${Genres.map(Genre => {
+          const GenreTotalMs = State.HistoryData
+            ? State.Data.Artists
+              .filter(Artist => (Artist.genres || []).includes(Genre.Name))
+              .reduce((Total, Artist) => Total + (State.HistoryData.artists?.[Artist.name.trim().toLowerCase()]?.totalMs || 0), 0)
+            : 0;
           return `
             <div class="genre-card">
               <div class="genre-header">
-                <span class="genre-name">${genre.name}</span>
-                <span class="genre-count">${genre.percentage}% ${genreTotalMs > 0 ? `• ${formatListeningTime(genreTotalMs)}` : ''}</span>
+                <span class="genre-name">${EscapeHtml(Genre.Name)}</span>
+                <span class="genre-count">${Genre.Percentage}% ${GenreTotalMs ? `• ${FormatListeningTime(GenreTotalMs)}` : ''}</span>
               </div>
-              <div class="genre-bar-bg"><div class="genre-bar-fill" style="width:${Math.max(genre.percentage * 2, 8)}%;"></div></div>
+              <div class="genre-bar-bg"><div class="genre-bar-fill" style="width:${Math.max(Genre.Percentage * 2, 8)}%;"></div></div>
             </div>
           `;
         }).join('')}
@@ -209,27 +266,24 @@ const tabRenderers = {
   },
   recent: () => `
     <div class="list-container">
-      ${!state.data.recent.length ? '<p style="color:var(--text-muted); padding:2rem; text-align:center;">No recently played tracks found.</p>' : ''}
-      ${state.data.recent.map((item, index) => {
-        const track = item.track || item;
-        return `
-          <a class="list-item" href="${track.external_urls?.spotify || '#'}" target="_blank" rel="noreferrer">
-            <span class="item-rank">${index + 1}</span>
-            <img class="item-image" src="${track.album?.images?.[0]?.url || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=100'}" alt="${track.name}" />
-            <div class="item-info">
-              <div class="item-title">${track.name}</div>
-              <div class="item-subtitle">${(track.artists || []).map(artist => artist.name).join(', ')}</div>
-            </div>
-            <div class="item-extra played-time"><i class="fa-regular fa-clock"></i> ${formatTimeAgo(item.played_at || new Date())}</div>
-          </a>
-        `;
+      ${State.Data.Recent.length ? '' : RenderEmptyState('No recently played tracks found.')}
+      ${State.Data.Recent.map((Item, Index) => {
+        const Track = Item.track || Item;
+        return RenderListItem({
+          Url: Track.external_urls?.spotify,
+          ImageUrl: Track.album?.images?.[0]?.url || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=100',
+          Name: Track.name,
+          Subtitle: (Track.artists || []).map(Artist => EscapeHtml(Artist.name)).join(', '),
+          Rank: RenderRank(Index, false),
+          Extra: `<div class="item-extra played-time"><i class="fa-regular fa-clock"></i> ${FormatTimeAgo(Item.played_at || new Date())}</div>`
+        });
       }).join('')}
     </div>
   `
 };
 
-function renderNavbar() {
-  const user = state.currentUser;
+function RenderNavbar() {
+  const User = State.CurrentUser;
   return `
     <header class="navbar">
       <div class="nav-container">
@@ -238,13 +292,13 @@ function renderNavbar() {
           <span>Stats for Spotify</span>
         </a>
         <div class="nav-actions">
-          ${user ? `
+          ${User ? `
             <button class="btn-secondary" id="btn-open-history" title="Import Streaming History for plays and listening time">
               <i class="fa-solid fa-file-arrow-up"></i> Import History
             </button>
             <div class="user-profile-badge">
-              <img class="user-avatar" src="${user.images?.[0]?.url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=50'}" alt="Avatar" />
-              <span>${user.display_name || 'Spotify User'}</span>
+              <img class="user-avatar" src="${EscapeHtml(SafeExternalUrl(User.images?.[0]?.url || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=50'))}" alt="Avatar" />
+              <span>${EscapeHtml(User.display_name || 'Spotify User')}</span>
             </div>
             <button class="btn-logout" id="btn-logout" title="Log out"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
           ` : `
@@ -256,8 +310,8 @@ function renderNavbar() {
   `;
 }
 
-function renderHistoryModal() {
-  if (!state.isHistoryModalOpen) return '';
+function RenderHistoryModal() {
+  if (!State.IsHistoryModalOpen) return '';
   return `
     <div class="modal-overlay" id="history-modal-overlay">
       <div class="modal-card">
@@ -291,44 +345,44 @@ function renderHistoryModal() {
   `;
 }
 
-async function handleLogin() {
-  const verifier = generateRandomString(64);
-  localStorage.setItem('spsv_code_verifier', verifier);
-  const challenge = await generateCodeChallenge(verifier);
+async function HandleLogin() {
+  const Verifier = GenerateRandomString(64);
+  localStorage.setItem('spsv_code_verifier', Verifier);
+  const Challenge = await GenerateCodeChallenge(Verifier);
 
   if (window.electronAPI?.openPopupAuth) {
-    showToast('Đang kết nối Spotify...');
+    ShowToast('Đang kết nối Spotify...');
     try {
-      const res = await window.electronAPI.openPopupAuth({ scopes: defaultScopes, challenge });
-      if (res?.code) {
-        showToast('Xác thực thành công! Đang tải profile...');
-        await exchangeCodeForToken(res.code, statsRedirectUri, defaultClientId);
-        state.isLoggedIn = true;
-        state.currentUser = await getCurrentUser();
-        await loadData();
-        showToast(`Chào mừng, ${state.currentUser.display_name || 'Spotify User'}!`);
+      const AuthResult = await window.electronAPI.openPopupAuth({ scopes: DefaultScopes, challenge: Challenge });
+      if (AuthResult?.code) {
+        ShowToast('Xác thực thành công! Đang tải profile...');
+        await ExchangeCodeForToken(AuthResult.code, StatsRedirectUri, DefaultClientId);
+        State.IsLoggedIn = true;
+        State.CurrentUser = await GetCurrentUser();
+        await LoadData();
+        ShowToast(`Chào mừng, ${State.CurrentUser.display_name || 'Spotify User'}!`);
       }
-    } catch (err) {
-      showToast(`Đăng nhập bị hủy hoặc lỗi: ${err.message}`, 'error');
+    } catch (RequestError) {
+      ShowToast(`Đăng nhập bị hủy hoặc lỗi: ${RequestError.message}`, 'error');
     }
     return;
   }
 
-  const params = new URLSearchParams({
-    client_id: defaultClientId,
+  const Params = new URLSearchParams({
+    client_id: DefaultClientId,
     response_type: 'code',
-    redirect_uri: statsRedirectUri,
-    scope: defaultScopes,
+    redirect_uri: StatsRedirectUri,
+    scope: DefaultScopes,
     code_challenge_method: 'S256',
-    code_challenge: challenge,
+    code_challenge: Challenge,
   });
-  window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
+  window.location.href = `https://accounts.spotify.com/authorize?${Params.toString()}`;
 }
 
-function render() {
-  if (!state.isLoggedIn && !state.isDemoMode) {
-    appElement.innerHTML = `
-      ${renderNavbar()}
+function Render() {
+  if (!State.IsLoggedIn && !State.IsDemoMode) {
+    AppElement.innerHTML = `
+      ${RenderNavbar()}
       <main class="main-wrapper">
         <section class="hero-section">
           <h1 class="hero-title">Your personal <span class="highlight">Spotify</span> listening analytics.</h1>
@@ -345,25 +399,25 @@ function render() {
       </main>
     `;
 
-    document.getElementById('btn-login-spotify')?.addEventListener('click', handleLogin);
-    document.getElementById('btn-trigger-demo')?.addEventListener('click', activateDemo);
-    document.getElementById('btn-demo-mode')?.addEventListener('click', activateDemo);
+    document.getElementById('btn-login-spotify')?.addEventListener('click', HandleLogin);
+    document.getElementById('btn-trigger-demo')?.addEventListener('click', ActivateDemo);
+    document.getElementById('btn-demo-mode')?.addEventListener('click', ActivateDemo);
     return;
   }
 
-  const isTimeframe = state.activeTab !== 'recent';
-  const content = state.loading
+  const IsTimeframe = State.ActiveTab !== 'recent';
+  const Content = State.Loading
     ? Array(10).fill('<div class="skeleton"></div>').join('')
-    : (tabRenderers[state.activeTab]?.() || '');
+    : (TabRenderers[State.ActiveTab]?.() || '');
 
-  appElement.innerHTML = `
-    ${renderNavbar()}
+  AppElement.innerHTML = `
+    ${RenderNavbar()}
     <main class="main-wrapper">
-      ${state.historyData ? `
+      ${State.HistoryData ? `
         <div class="history-summary-banner">
           <div class="history-summary-info">
             <i class="fa-solid fa-chart-line"></i>
-            <span>Total Streaming Time: <strong>${formatListeningTime(state.historyData.totalMs)}</strong> across <strong>${state.historyData.totalPlays.toLocaleString()}</strong> plays</span>
+            <span>Total Streaming Time: <strong>${FormatListeningTime(State.HistoryData.totalMs)}</strong> across <strong>${State.HistoryData.totalPlays.toLocaleString()}</strong> plays</span>
           </div>
           <div class="history-banner-actions">
             <button class="btn-history-small" id="btn-update-history"><i class="fa-solid fa-rotate"></i> Update Data</button>
@@ -373,238 +427,240 @@ function render() {
       ` : ''}
 
       <nav class="section-tabs">
-        <button class="tab-btn ${state.activeTab === 'tracks' ? 'active' : ''}" data-tab="tracks"><i class="fa-solid fa-music"></i> Top Tracks</button>
-        <button class="tab-btn ${state.activeTab === 'artists' ? 'active' : ''}" data-tab="artists"><i class="fa-solid fa-microphone"></i> Top Artists</button>
-        <button class="tab-btn ${state.activeTab === 'genres' ? 'active' : ''}" data-tab="genres"><i class="fa-solid fa-chart-pie"></i> Top Genres</button>
-        <button class="tab-btn ${state.activeTab === 'recent' ? 'active' : ''}" data-tab="recent"><i class="fa-solid fa-clock-rotate-left"></i> Recently Played</button>
+        <button class="tab-btn ${State.ActiveTab === 'tracks' ? 'active' : ''}" data-tab="tracks"><i class="fa-solid fa-music"></i> Top Tracks</button>
+        <button class="tab-btn ${State.ActiveTab === 'artists' ? 'active' : ''}" data-tab="artists"><i class="fa-solid fa-microphone"></i> Top Artists</button>
+        <button class="tab-btn ${State.ActiveTab === 'genres' ? 'active' : ''}" data-tab="genres"><i class="fa-solid fa-chart-pie"></i> Top Genres</button>
+        <button class="tab-btn ${State.ActiveTab === 'recent' ? 'active' : ''}" data-tab="recent"><i class="fa-solid fa-clock-rotate-left"></i> Recently Played</button>
       </nav>
 
-      ${isTimeframe ? `
+      ${IsTimeframe ? `
         <div class="timeframe-container">
           <div class="timeframe-group">
-            <button class="timeframe-btn ${state.timeRange === 'short_term' ? 'active' : ''}" data-range="short_term">4 Weeks</button>
-            <button class="timeframe-btn ${state.timeRange === 'medium_term' ? 'active' : ''}" data-range="medium_term">6 Months</button>
-            <button class="timeframe-btn ${state.timeRange === 'long_term' ? 'active' : ''}" data-range="long_term">All Time</button>
+            <button class="timeframe-btn ${State.TimeRange === 'short_term' ? 'active' : ''}" data-range="short_term">4 Weeks</button>
+            <button class="timeframe-btn ${State.TimeRange === 'medium_term' ? 'active' : ''}" data-range="medium_term">6 Months</button>
+            <button class="timeframe-btn ${State.TimeRange === 'long_term' ? 'active' : ''}" data-range="long_term">All Time</button>
           </div>
           <div class="action-buttons">
-            ${state.activeTab === 'tracks' ? '<button class="btn-accent" id="btn-create-playlist"><i class="fa-solid fa-plus"></i> Create Playlist</button>' : ''}
+            ${State.ActiveTab === 'tracks' ? '<button class="btn-accent" id="btn-create-playlist"><i class="fa-solid fa-plus"></i> Create Playlist</button>' : ''}
             <button class="btn-secondary" id="btn-refresh"><i class="fa-solid fa-rotate-right"></i> Refresh</button>
           </div>
         </div>
       ` : ''}
 
-      ${content}
+      ${Content}
     </main>
-    ${renderHistoryModal()}
+    ${RenderHistoryModal()}
   `;
 
-  attachEvents();
+  AttachEvents();
 }
 
-function parseBrowserHistoryFiles(files) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./historyWorker.js', import.meta.url), { type: 'module' });
+function ParseBrowserHistoryFiles(Files) {
+  return new Promise((Resolve, Reject) => {
+    const HistoryWorker = new Worker(new URL('./historyWorker.js', import.meta.url), { type: 'module' });
 
-    worker.addEventListener('message', ({ data }) => {
-      worker.terminate();
-      resolve(data);
+    HistoryWorker.addEventListener('message', ({ data: Data }) => {
+      HistoryWorker.terminate();
+      Resolve(Data);
     }, { once: true });
-    worker.addEventListener('error', event => {
-      worker.terminate();
-      reject(new Error(event.message || 'History worker failed'));
+    HistoryWorker.addEventListener('error', ErrorEvent => {
+      HistoryWorker.terminate();
+      Reject(new Error(ErrorEvent.message || 'History worker failed'));
     }, { once: true });
-    worker.addEventListener('messageerror', () => {
-      worker.terminate();
-      reject(new Error('History worker returned invalid data'));
+    HistoryWorker.addEventListener('messageerror', () => {
+      HistoryWorker.terminate();
+      Reject(new Error('History worker returned invalid data'));
     }, { once: true });
 
-    worker.postMessage({ files });
+    HistoryWorker.postMessage({ files: Files });
   });
 }
 
-function saveHistoryData(historyData) {
-  state.historyData = historyData;
+function SaveHistoryData(HistoryData) {
+  State.HistoryData = HistoryData;
   try {
-    storeHistoryData(historyData);
+    StoreHistoryData(HistoryData);
     return true;
-  } catch (error) {
-    console.error('Failed to store Spotify history:', error);
+  } catch (StorageError) {
+    console.error('Failed to store Spotify history:', StorageError);
     return false;
   }
 }
 
-async function importHistory(loadResult, successMessage) {
-  if (state.historyImporting) return showToast('A history import is already in progress', 'error');
+async function ImportHistory(LoadResult, SuccessMessage) {
+  if (State.HistoryImporting) return ShowToast('A history import is already in progress', 'error');
 
-  state.historyImporting = true;
-  showToast('Processing Spotify history in the background...');
+  State.HistoryImporting = true;
+  ShowToast('Processing Spotify history in the background...');
   try {
-    const result = await loadResult();
-    if (!result) return;
-    if (result?.error) throw new Error(result.error);
-    if (!result?.historyData?.totalPlays) return showToast('No valid streaming records found', 'error');
+    const Result = await LoadResult();
+    if (!Result) return;
+    if (Result?.error) throw new Error(Result.error);
+    if (!Result?.historyData?.totalPlays) return ShowToast('No valid streaming records found', 'error');
 
-    const saved = saveHistoryData(result.historyData);
-    state.isHistoryModalOpen = false;
-    render();
-    showToast(`${successMessage(result)}${saved ? '' : ' History is available for this session but could not be saved.'}`, saved ? 'success' : 'error');
-  } catch (error) {
-    console.error('Failed to import Spotify history:', error);
-    showToast('Failed to import Spotify history. Check the selected JSON files and try again.', 'error');
+    const Saved = SaveHistoryData(Result.historyData);
+    State.IsHistoryModalOpen = false;
+    Render();
+    ShowToast(`${SuccessMessage(Result)}${Saved ? '' : ' History is available for this session but could not be saved.'}`, Saved ? 'success' : 'error');
+  } catch (ImportError) {
+    console.error('Failed to import Spotify history:', ImportError);
+    ShowToast('Failed to import Spotify history. Check the selected JSON files and try again.', 'error');
   } finally {
-    state.historyImporting = false;
+    State.HistoryImporting = false;
   }
 }
 
-function processJsonFiles(files) {
-  return importHistory(() => parseBrowserHistoryFiles(files), result =>
-    `Imported ${result.historyData.totalPlays.toLocaleString()} plays (${formatListeningTime(result.historyData.totalMs)})!`
+function ProcessJsonFiles(Files) {
+  return ImportHistory(() => ParseBrowserHistoryFiles(Files), Result =>
+    `Imported ${Result.historyData.totalPlays.toLocaleString()} plays (${FormatListeningTime(Result.historyData.totalMs)})!`
   );
 }
 
-function attachEvents() {
+function AttachEvents() {
   document.getElementById('brand-home')?.addEventListener('click', () => {
-    state.activeTab = 'tracks';
-    loadData();
+    State.ActiveTab = 'tracks';
+    LoadData();
   });
 
   document.getElementById('btn-logout')?.addEventListener('click', () => {
-    if (state.isDemoMode) {
-      state.isDemoMode = false;
-      state.currentUser = null;
-      render();
+    if (State.IsDemoMode) {
+      State.IsDemoMode = false;
+      State.CurrentUser = null;
+      DataLoadRequestId++;
+      State.Loading = false;
+      Render();
       return;
     }
-    logout();
+    Logout();
   });
 
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const tab = e.currentTarget.dataset.tab;
-      if (tab !== state.activeTab) {
-        state.activeTab = tab;
-        loadData();
+  document.querySelectorAll('.tab-btn').forEach(Button => {
+    Button.addEventListener('click', (Event) => {
+      const Tab = Event.currentTarget.dataset.tab;
+      if (Tab !== State.ActiveTab) {
+        State.ActiveTab = Tab;
+        LoadData();
       }
     });
   });
 
-  document.querySelectorAll('.timeframe-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const range = e.currentTarget.dataset.range;
-      if (range !== state.timeRange) {
-        state.timeRange = range;
-        loadData();
+  document.querySelectorAll('.timeframe-btn').forEach(Button => {
+    Button.addEventListener('click', (Event) => {
+      const Range = Event.currentTarget.dataset.range;
+      if (Range !== State.TimeRange) {
+        State.TimeRange = Range;
+        LoadData();
       }
     });
   });
 
-  document.getElementById('btn-create-playlist')?.addEventListener('click', handleCreatePlaylist);
-  document.getElementById('btn-refresh')?.addEventListener('click', () => {
-    loadData();
-    showToast('Stats reloaded from Spotify!');
+  document.getElementById('btn-create-playlist')?.addEventListener('click', HandleCreatePlaylist);
+  document.getElementById('btn-refresh')?.addEventListener('click', async () => {
+    const Reloaded = await LoadData({ Force: true });
+    if (Reloaded) ShowToast('Stats reloaded from Spotify!');
   });
 
-  const openModal = () => { state.isHistoryModalOpen = true; render(); };
-  document.getElementById('btn-open-history')?.addEventListener('click', openModal);
-  document.getElementById('btn-update-history')?.addEventListener('click', openModal);
+  const OpenModal = () => { State.IsHistoryModalOpen = true; Render(); };
+  document.getElementById('btn-open-history')?.addEventListener('click', OpenModal);
+  document.getElementById('btn-update-history')?.addEventListener('click', OpenModal);
   document.getElementById('btn-clear-history')?.addEventListener('click', () => {
-    clearStoredHistory();
-    state.historyData = null;
-    render();
-    showToast('Cleared imported streaming history');
+    ClearStoredHistory();
+    State.HistoryData = null;
+    Render();
+    ShowToast('Cleared imported streaming history');
   });
 
   document.getElementById('btn-close-modal')?.addEventListener('click', () => {
-    state.isHistoryModalOpen = false;
-    render();
+    State.IsHistoryModalOpen = false;
+    Render();
   });
 
-  document.getElementById('link-spotify-privacy')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    const url = 'https://www.spotify.com/account/privacy/';
+  document.getElementById('link-spotify-privacy')?.addEventListener('click', (Event) => {
+    Event.preventDefault();
+    const Url = 'https://www.spotify.com/account/privacy/';
     if (window.electronAPI?.openExternalUrl) {
-      window.electronAPI.openExternalUrl(url);
+      window.electronAPI.openExternalUrl(Url);
     } else {
-      window.open(url, '_blank');
+      window.open(Url, '_blank');
     }
   });
 
   document.getElementById('btn-scan-downloads')?.addEventListener('click', async () => {
-    await importHistory(
+    await ImportHistory(
       () => window.electronAPI?.scanDownloadsHistory?.(),
-      result => `Found ${result.files.length} files in Downloads! Imported ${result.historyData.totalPlays.toLocaleString()} plays.`
+      Result => `Found ${Result.files.length} files in Downloads! Imported ${Result.historyData.totalPlays.toLocaleString()} plays.`
     );
   });
 
   document.getElementById('btn-load-sample')?.addEventListener('click', () => {
-    saveHistoryData(generateSampleHistory(state.data.tracks, state.data.artists));
-    state.isHistoryModalOpen = false;
-    render();
-    showToast(`Loaded sample listening history: ${state.historyData.totalPlays.toLocaleString()} plays (${formatListeningTime(state.historyData.totalMs)})!`);
+    SaveHistoryData(GenerateSampleHistory(State.Data.Tracks));
+    State.IsHistoryModalOpen = false;
+    Render();
+    ShowToast(`Loaded sample listening history: ${State.HistoryData.totalPlays.toLocaleString()} plays (${FormatListeningTime(State.HistoryData.totalMs)})!`);
   });
 
-  const dropzone = document.getElementById('history-dropzone');
-  const fileInput = document.getElementById('file-history-input');
+  const Dropzone = document.getElementById('history-dropzone');
+  const FileInput = document.getElementById('file-history-input');
 
-  dropzone?.addEventListener('click', async () => {
+  Dropzone?.addEventListener('click', async () => {
     if (window.electronAPI?.selectHistoryFiles) {
-      await importHistory(
+      await ImportHistory(
         () => window.electronAPI.selectHistoryFiles(),
-        result => `Imported ${result.historyData.totalPlays.toLocaleString()} plays from ${result.files.length} files!`
+        Result => `Imported ${Result.historyData.totalPlays.toLocaleString()} plays from ${Result.files.length} files!`
       );
       return;
     }
-    fileInput?.click();
+    FileInput?.click();
   });
 
-  fileInput?.addEventListener('change', (e) => {
-    if (e.target.files?.length) processJsonFiles(Array.from(e.target.files));
+  FileInput?.addEventListener('change', (Event) => {
+    if (Event.target.files?.length) ProcessJsonFiles(Array.from(Event.target.files));
   });
 
-  dropzone?.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropzone.classList.add('drag-active');
+  Dropzone?.addEventListener('dragover', (Event) => {
+    Event.preventDefault();
+    Dropzone.classList.add('drag-active');
   });
 
-  dropzone?.addEventListener('dragleave', () => dropzone.classList.remove('drag-active'));
-  dropzone?.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropzone.classList.remove('drag-active');
-    if (e.dataTransfer.files?.length) processJsonFiles(Array.from(e.dataTransfer.files));
+  Dropzone?.addEventListener('dragleave', () => Dropzone.classList.remove('drag-active'));
+  Dropzone?.addEventListener('drop', (Event) => {
+    Event.preventDefault();
+    Dropzone.classList.remove('drag-active');
+    if (Event.dataTransfer.files?.length) ProcessJsonFiles(Array.from(Event.dataTransfer.files));
   });
 }
 
-function activateDemo() {
-  state.isDemoMode = true;
-  state.currentUser = mockUser;
-  state.activeTab = 'tracks';
-  loadData();
-  showToast('Welcome to Stats for Spotify Demo Mode!');
+function ActivateDemo() {
+  State.IsDemoMode = true;
+  State.CurrentUser = MockUser;
+  State.ActiveTab = 'tracks';
+  LoadData();
+  ShowToast('Welcome to Stats for Spotify Demo Mode!');
 }
 
-async function init() {
-  const cachedUser = getCachedUser();
-  if (cachedUser) {
-    state.isLoggedIn = true;
-    state.currentUser = cachedUser;
-    render();
+async function InitializeApp() {
+  const CachedUser = GetCachedUser();
+  if (CachedUser) {
+    State.IsLoggedIn = true;
+    State.CurrentUser = CachedUser;
+    Render();
   }
 
-  const tokenFromCallback = await handleAuthCallback();
-  const token = tokenFromCallback || (await getValidAccessToken());
-  if (token) {
+  const TokenFromCallback = await HandleAuthCallback();
+  const Token = TokenFromCallback || (await GetValidAccessToken());
+  if (Token) {
     try {
-      state.isLoggedIn = true;
-      state.currentUser = await getCurrentUser();
-      await loadData();
+      State.IsLoggedIn = true;
+      State.CurrentUser = await GetCurrentUser();
+      await LoadData();
       return;
-    } catch (e) {
-      console.warn('Token check failed:', e);
-      if (!cachedUser) state.isLoggedIn = false;
+    } catch (AuthError) {
+      console.warn('Token check failed:', AuthError);
+      if (!CachedUser) State.IsLoggedIn = false;
     }
   }
 
-  if (!cachedUser) render();
+  if (!CachedUser) Render();
 }
 
-init();
+InitializeApp();
